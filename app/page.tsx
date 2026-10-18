@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+type Doc = { id: string; name: string; size: number; uploadedAt: string };
+
 type Msg = {
   role: "user" | "assistant";
   content: string;
@@ -31,6 +33,92 @@ export default function Page() {
   const [best, setBest] = useState(false); // mode jawaban terbaik (beberapa model + penilai)
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Login (hanya jika APP_PASSWORD diisi) dan dokumen
+  const [auth, setAuth] = useState<{ required: boolean; authed: boolean } | null>(null);
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [docs, setDocs] = useState<Doc[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [docsMsg, setDocsMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  async function loadDocs() {
+    try {
+      const res = await fetch("/api/docs");
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) return setAuth({ required: true, authed: false });
+      if (!res.ok) return setDocsMsg(data.error ?? `Gagal memuat dokumen (HTTP ${res.status})`);
+      setDocs(data.docs ?? []);
+      setSelected((sel) => sel.filter((id) => (data.docs ?? []).some((d: Doc) => d.id === id)));
+      setDocsMsg("");
+    } catch {
+      setDocsMsg("Gagal memuat dokumen.");
+    }
+  }
+
+  useEffect(() => {
+    fetch("/api/login")
+      .then((r) => r.json())
+      .then((a) => setAuth(a))
+      .catch(() => setAuth({ required: false, authed: true }));
+  }, []);
+
+  useEffect(() => {
+    if (auth?.required && auth.authed) loadDocs();
+  }, [auth]);
+
+  async function login() {
+    setLoginError("");
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (res.ok) {
+      setPassword("");
+      setAuth({ required: true, authed: true });
+    } else {
+      setLoginError((await res.json().catch(() => ({}))).error ?? "Login gagal.");
+    }
+  }
+
+  async function logout() {
+    await fetch("/api/login", { method: "DELETE" });
+    setDocs([]);
+    setSelected([]);
+    setAuth({ required: true, authed: false });
+  }
+
+  async function upload(file: File) {
+    setUploading(true);
+    setDocsMsg("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/docs", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Unggah gagal (HTTP ${res.status})`);
+      if (data.truncated) setDocsMsg("Dokumen terlalu panjang, hanya 200.000 karakter pertama yang disimpan.");
+      await loadDocs();
+      setSelected((sel) => [...sel, data.doc.id].slice(0, 5));
+    } catch (e) {
+      setDocsMsg(e instanceof Error ? e.message : "Unggah gagal.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeDoc(id: string) {
+    const res = await fetch(`/api/docs?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) setDocsMsg((await res.json().catch(() => ({}))).error ?? "Gagal menghapus.");
+    await loadDocs();
+  }
+
+  function toggleDoc(id: string) {
+    setSelected((sel) => (sel.includes(id) ? sel.filter((x) => x !== id) : sel.length >= 5 ? sel : [...sel, id]));
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -53,8 +141,14 @@ export default function Page() {
         body: JSON.stringify({
           messages: history.map(({ role, content }) => ({ role, content })),
           mode: best ? "best" : "single",
+          docs: selected,
         }),
       });
+
+      if (res.status === 401) {
+        setAuth({ required: true, authed: false });
+        throw new Error("Sesi login berakhir. Masuk lagi lalu kirim ulang.");
+      }
 
       if (!res.ok || !res.body) {
         throw new Error((await res.text()) || `HTTP ${res.status}`);
@@ -91,6 +185,35 @@ export default function Page() {
     }
   }
 
+  if (auth?.required && !auth.authed) {
+    return (
+      <main className="app">
+        <header>
+          <span>LLM Chat</span>
+        </header>
+        <form
+          className="login"
+          onSubmit={(e) => {
+            e.preventDefault();
+            login();
+          }}
+        >
+          <input
+            type="password"
+            value={password}
+            placeholder="Kata sandi"
+            autoFocus
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button type="submit" disabled={!password}>
+            Masuk
+          </button>
+          {loginError && <div className="login-error">{loginError}</div>}
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="app">
       <header>
@@ -99,10 +222,51 @@ export default function Page() {
           <input type="checkbox" checked={best} onChange={(e) => setBest(e.target.checked)} disabled={loading} />
           Jawaban terbaik (beberapa model)
         </label>
+        {auth?.required && (
+          <button onClick={() => setDocsOpen((o) => !o)}>
+            Dokumen{selected.length ? ` (${selected.length} dipakai)` : ""}
+          </button>
+        )}
         <button onClick={() => setMessages([])} disabled={loading}>
           Percakapan baru
         </button>
+        {auth?.required && <button onClick={logout}>Keluar</button>}
       </header>
+
+      {auth?.required && docsOpen && (
+        <section className="docs">
+          <label className="upload">
+            {uploading ? "Mengunggah…" : "Unggah berkas (pdf, txt, md, csv, json; maks 4 MB)"}
+            <input
+              type="file"
+              accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.html,.htm"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) upload(f);
+              }}
+            />
+          </label>
+          {docsMsg && <div className="docs-msg">{docsMsg}</div>}
+          {docs.length === 0 && !docsMsg && <div className="docs-empty">Belum ada dokumen.</div>}
+          <ul>
+            {docs.map((d) => (
+              <li key={d.id}>
+                <label>
+                  <input type="checkbox" checked={selected.includes(d.id)} onChange={() => toggleDoc(d.id)} />
+                  <span className="doc-name">{d.name}</span>
+                  <span className="doc-size">{Math.max(1, Math.round(d.size / 1024))} KB</span>
+                </label>
+                <button onClick={() => removeDoc(d.id)} title="Hapus dokumen" aria-label={`Hapus ${d.name}`}>
+                  Hapus
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="docs-hint">Dokumen yang dicentang (maksimal 5) dipakai sebagai konteks tiap pertanyaan.</div>
+        </section>
+      )}
 
       <div className="messages">
         {messages.length === 0 && (

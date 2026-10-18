@@ -1,4 +1,6 @@
-import { callTool, tools } from "../../../lib/tools";
+import { chatGate } from "../../../lib/auth";
+import { buildContext } from "../../../lib/docs";
+import { callTool, chatTools } from "../../../lib/tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,10 +38,12 @@ const JUDGE_SYSTEM_PROMPT = [
 // Model yang jelas bukan model chat (embedding, rerank, moderasi, audio) dilewati.
 const NON_CHAT_MODEL = /embed|rerank|safety|guard|moderation|audio|tts|whisper/i;
 
-const openAiTools = tools.map((t) => ({
-  type: "function" as const,
-  function: { name: t.name, description: t.description, parameters: t.inputSchema },
-}));
+function openAiToolsFor(list: ReturnType<typeof chatTools>) {
+  return list.map((t) => ({
+    type: "function" as const,
+    function: { name: t.name, description: t.description, parameters: t.inputSchema },
+  }));
+}
 
 // LLM_MODELS (atau LLM_MODEL) boleh berisi satu atau beberapa nama model, dipisah koma atau baris baru.
 // Urutannya = urutan prioritas; model berikutnya dipakai jika model sebelumnya gagal.
@@ -80,6 +84,8 @@ async function chatWithTools(
 ): Promise<{ text: string; toolsUsed: string[] } | null> {
   const convo: Record<string, unknown>[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
   const toolsUsed: string[] = [];
+  const available = chatTools();
+  const openAiTools = openAiToolsFor(available);
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -115,9 +121,9 @@ async function chatWithTools(
       } catch {
         // argumen rusak: biarkan kosong, tool akan melaporkan parameter yang kurang
       }
-      const { text } = await callTool(call.function.name, args);
+      const { text } = await callTool(call.function.name, args, available);
       // Hanya nama tool yang benar-benar ada yang dicatat (aman dipakai sebagai nilai header).
-      if (tools.some((t) => t.name === call.function.name) && !toolsUsed.includes(call.function.name)) {
+      if (available.some((t) => t.name === call.function.name) && !toolsUsed.includes(call.function.name)) {
         toolsUsed.push(call.function.name);
       }
       convo.push({ role: "tool", tool_call_id: call.id, content: text });
@@ -319,6 +325,8 @@ function toByteStream(first: string, rest: AsyncGenerator<string, void, undefine
 const TEXT_HEADERS = { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" };
 
 export async function POST(req: Request) {
+  const blocked = chatGate(req);
+  if (blocked) return blocked;
   const startedAt = Date.now();
   const baseUrl = (process.env.LLM_BASE_URL ?? "https://api.groq.com/openai/v1").replace(/\/$/, "");
   const apiKey = process.env.LLM_API_KEY;
@@ -327,20 +335,41 @@ export async function POST(req: Request) {
     return new Response("LLM_API_KEY belum diatur di environment variables.", { status: 500 });
   }
 
-  let body: { messages?: ChatMessage[]; mode?: string };
+  let body: { messages?: ChatMessage[]; mode?: string; docs?: unknown };
   try {
     body = await req.json();
   } catch {
     return new Response("Body request tidak valid.", { status: 400 });
   }
 
-  const messages = (body.messages ?? [])
+  let messages = (body.messages ?? [])
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
     .slice(-MAX_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) }));
 
   if (messages.length === 0) {
     return new Response("Pesan kosong.", { status: 400 });
+  }
+
+  // Dokumen yang dicentang pengguna disisipkan sebagai konteks di awal percakapan.
+  // Hanya bila login aktif (APP_PASSWORD diisi); chatGate sudah memastikan pengguna sah.
+  const docIds = Array.isArray(body.docs) ? body.docs.filter((d): d is string => typeof d === "string") : [];
+  let docNames: string[] = [];
+  if (docIds.length && process.env.APP_PASSWORD) {
+    try {
+      const ctx = await buildContext(docIds);
+      if (ctx) {
+        docNames = ctx.names;
+        messages = [
+          { role: "user", content: ctx.block },
+          { role: "assistant", content: "Baik, saya akan memakai dokumen tersebut sebagai konteks." },
+          ...messages,
+        ];
+      }
+    } catch (e) {
+      console.error("context error", e);
+      return new Response("Dokumen tidak bisa dibaca saat ini. Cek penyimpanan Blob atau lepas centang dokumen.", { status: 502 });
+    }
   }
 
   const models = parseModels();

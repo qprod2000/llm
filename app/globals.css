@@ -56,3 +56,18 @@ form { display: flex; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid v
 textarea { flex: 1; resize: none; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; max-height: 160px; }
 form button { background: var(--user); color: #fff; border: 0; border-radius: 10px; padding: 0 18px; font-weight: 600; cursor: pointer; }
 form button:disabled { opacity: 0.5; cursor: default; }
+
+/* Login dan panel dokumen */
+.login { flex-direction: column; align-items: stretch; max-width: 320px; margin: auto; border: 0; }
+.login input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.login button { padding: 10px 18px; }
+.login-error, .docs-msg { color: #dc2626; font-size: 13px; }
+.docs { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
+.docs .upload { display: block; border: 1px dashed var(--border); border-radius: 10px; padding: 10px 12px; color: var(--muted); cursor: pointer; }
+.docs .upload input { display: block; margin-top: 6px; max-width: 100%; }
+.docs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.docs li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.docs li label { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
+.docs li button { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px; padding: 2px 8px; cursor: pointer; flex: none; }
+.doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-size, .docs-empty, .docs-hint { color: var(--muted); font-size: 12px; flex: none; }

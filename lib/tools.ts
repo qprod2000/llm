@@ -1,3 +1,5 @@
+import { DocError, MAX_DOC_CHARS, addDoc, listDocs, readDoc, searchDocs } from "./docs";
+
 // Definisi tool dipakai bersama oleh server MCP (/api/mcp) dan chat (/api/chat).
 // Untuk menambah tool baru, cukup tambahkan satu objek ke array `tools` di bawah.
 
@@ -153,19 +155,98 @@ const calculate: Tool = {
   },
 };
 
-export const tools: Tool[] = [getCurrentTime, calculate];
+// ---------- Tool dokumen (butuh Vercel Blob) ----------
+const listDocuments: Tool = {
+  name: "list_documents",
+  description: "Menampilkan daftar dokumen yang tersimpan (id, nama, ukuran, tanggal unggah).",
+  inputSchema: { type: "object", properties: {} },
+  async run() {
+    const docs = await listDocs();
+    if (!docs.length) return "Belum ada dokumen tersimpan.";
+    return docs.map((d) => `- [${d.id}] ${d.name} (${d.size} byte, ${d.uploadedAt})`).join("\n");
+  },
+};
+
+const readDocument: Tool = {
+  name: "read_document",
+  description: "Membaca isi teks satu dokumen berdasarkan id. Untuk dokumen panjang, pakai offset untuk bagian berikutnya.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "ID dokumen dari list_documents." },
+      offset: { type: "number", description: "Mulai dari karakter ke-berapa (default 0)." },
+      length: { type: "number", description: "Jumlah karakter (default 20000, maksimal 50000)." },
+    },
+    required: ["id"],
+  },
+  async run(args) {
+    if (typeof args.id !== "string") throw new ToolError("Parameter 'id' wajib berupa teks.");
+    const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+    const length = Math.min(50_000, Math.max(1, Math.floor(Number(args.length) || 20_000)));
+    const { meta, text } = await readDoc(args.id);
+    const part = text.slice(offset, offset + length);
+    const end = offset + part.length;
+    const more = end < text.length ? ` Masih ada lanjutan: panggil lagi dengan offset=${end}.` : "";
+    return `Dokumen: ${meta.name} (karakter ${offset}-${end} dari ${text.length}).${more}\n\n${part}`;
+  },
+};
+
+const searchDocuments: Tool = {
+  name: "search_documents",
+  description: "Mencari kata kunci di semua dokumen tersimpan; mengembalikan dokumen yang cocok beserta cuplikannya.",
+  inputSchema: {
+    type: "object",
+    properties: { query: { type: "string", description: "Kata kunci, dipisah spasi." } },
+    required: ["query"],
+  },
+  async run(args) {
+    if (typeof args.query !== "string") throw new ToolError("Parameter 'query' wajib berupa teks.");
+    return searchDocs(args.query);
+  },
+};
+
+const addDocument: Tool = {
+  name: "add_document",
+  description: `Menyimpan teks sebagai dokumen baru (maksimal ${MAX_DOC_CHARS} karakter).`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Nama dokumen, misalnya catatan.md." },
+      content: { type: "string", description: "Isi teks dokumen." },
+    },
+    required: ["name", "content"],
+  },
+  async run(args) {
+    if (typeof args.name !== "string" || typeof args.content !== "string") {
+      throw new ToolError("Parameter 'name' dan 'content' wajib berupa teks.");
+    }
+    const { meta, truncated } = await addDoc(args.name, args.content);
+    return `Tersimpan: [${meta.id}] ${meta.name}${truncated ? " (dipotong karena terlalu panjang)" : ""}`;
+  },
+};
+
+export const tools: Tool[] = [getCurrentTime, calculate, listDocuments, readDocument, searchDocuments, addDocument];
+
+// Tool untuk chat web: dokumen hanya tersedia bila APP_PASSWORD diisi (supaya pengunjung anonim
+// tidak bisa membaca dokumen), dan chat hanya boleh membaca, tidak menulis dokumen.
+export function chatTools(): Tool[] {
+  const docsOk = !!process.env.APP_PASSWORD;
+  const docTools = ["list_documents", "read_document", "search_documents"];
+  return tools.filter((t) => (t.name === "add_document" ? false : docTools.includes(t.name) ? docsOk : true));
+}
 
 export async function callTool(
   name: string,
   args: Record<string, unknown>,
+  available: Tool[] = tools,
 ): Promise<{ text: string; isError: boolean }> {
-  const tool = tools.find((t) => t.name === name);
+  const tool = available.find((t) => t.name === name);
   if (!tool) return { text: `Tool tidak dikenal: ${name}`, isError: true };
   try {
     return { text: await tool.run(args ?? {}), isError: false };
   } catch (err) {
     // Hanya pesan dari ToolError yang diteruskan apa adanya; error lain disamarkan.
-    const text = err instanceof ToolError ? err.message : "Terjadi kesalahan saat menjalankan tool.";
+    const text = err instanceof ToolError || err instanceof DocError ? err.message : "Terjadi kesalahan saat menjalankan tool.";
     return { text, isError: true };
   }
 }

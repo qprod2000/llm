@@ -19,6 +19,8 @@ Opsional:
 | `LLM_MODELS` | Daftar model cadangan (koma atau baris baru, maksimal 4). Dicoba berurutan sampai ada yang menjawab |
 | `MCP_AUTH_TOKEN` | Mengaktifkan server MCP di `/api/mcp`. Klien wajib mengirim `Authorization: Bearer <token>` |
 | `CHAT_TOOLS` | Isi `true` agar chat boleh memanggil tool (butuh model yang mendukung tool calling) |
+| `APP_PASSWORD` | Kata sandi akses. Wajib untuk fitur dokumen; jika diisi, chat juga meminta login |
+| `BLOB_READ_WRITE_TOKEN` | Terisi otomatis saat store Vercel Blob dihubungkan ke proyek (tempat dokumen disimpan) |
 
 ## Tampilan
 
@@ -69,6 +71,16 @@ curl -s https://<domain-anda>/api/mcp \
 ```
 
 Untuk menyambungkan dari klien MCP, pakai alamat `https://<domain-anda>/api/mcp` dan kirim header `Authorization: Bearer <token>` (klien yang hanya mendukung OAuth tidak bisa dipakai dengan token statis ini).
+
+## Dokumen
+
+Unggah berkas agar bisa dipakai sebagai konteks chat dan dibaca lewat MCP.
+
+- **Prasyarat:** buat store di Vercel (Storage → Create → Blob) dan hubungkan ke proyek, isi `APP_PASSWORD` (tipe Secret), lalu Redeploy. Tanpa `APP_PASSWORD`, fitur dokumen mati supaya dokumen tidak terbuka untuk umum.
+- **Format:** pdf berisi teks (hasil scan/gambar tidak terbaca), txt, md, csv, tsv, json, log, xml, yaml, html. Maksimal 4 MB per berkas (batas body fungsi Vercel); teks yang disimpan maksimal 200.000 karakter. Word/Excel belum didukung.
+- **Di chat:** klik **Dokumen**, unggah, lalu centang dokumen yang dipakai (maksimal 5). Isinya disisipkan sebagai konteks (total sekitar 24.000 karakter, dibagi rata; yang lebih panjang dipotong). Mode "Jawaban terbaik": para calon melihat dokumen, penilai hanya melihat percakapan dan jawaban calon.
+- **Di MCP:** tool `list_documents`, `read_document` (bisa bertahap dengan `offset`), `search_documents` (pencarian kata kunci sederhana di 30 dokumen terbaru), dan `add_document`. Chat web hanya boleh membaca, tidak menulis dokumen.
+- Isi dokumen diperlakukan sebagai data, bukan instruksi, tetapi model tetap bisa terpengaruh teks di dalamnya; jangan unggah dokumen dari sumber yang tidak dipercaya jika chat tool aktif.
 
 ## Jalankan lokal
 
