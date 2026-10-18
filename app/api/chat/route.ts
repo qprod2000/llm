@@ -54,7 +54,10 @@ async function chatWithTools(
     const msg = data?.choices?.[0]?.message;
     const calls: ToolCall[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
 
-    if (calls.length === 0) return typeof msg?.content === "string" ? msg.content : "";
+    if (calls.length === 0) {
+      const content = typeof msg?.content === "string" ? msg.content.trim() : "";
+      return content || "Model tidak mengembalikan jawaban. Coba kirim ulang atau ganti LLM_MODEL.";
+    }
 
     convo.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
     for (const call of calls) {
@@ -140,6 +143,9 @@ export async function POST(req: Request) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
+  let emitted = false;
+  let providerError = "";
+  let sawReasoning = false;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -157,8 +163,23 @@ export async function POST(req: Request) {
             const data = trimmed.slice(5).trim();
             if (data === "[DONE]") continue;
             try {
-              const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-              if (delta) controller.enqueue(encoder.encode(delta));
+              const parsed = JSON.parse(data);
+              // Sebagian provider (mis. OpenRouter) mengirim error di tengah stream dengan HTTP 200.
+              if (parsed?.error) {
+                providerError =
+                  typeof parsed.error === "string"
+                    ? parsed.error
+                    : (parsed.error.message ?? JSON.stringify(parsed.error));
+                continue;
+              }
+              const choice = parsed?.choices?.[0];
+              const delta = choice?.delta?.content;
+              if (delta) {
+                emitted = true;
+                controller.enqueue(encoder.encode(delta));
+              } else if (choice?.delta?.reasoning || choice?.delta?.reasoning_content) {
+                sawReasoning = true;
+              }
             } catch {
               // abaikan baris SSE yang bukan JSON
             }
@@ -167,6 +188,16 @@ export async function POST(req: Request) {
       } catch (err) {
         controller.error(err);
         return;
+      }
+      if (!emitted) {
+        // Jangan biarkan gelembung kosong: jelaskan apa yang terjadi.
+        const reason = providerError
+          ? `Provider mengembalikan error: ${providerError.slice(0, 300)}`
+          : sawReasoning
+            ? "Model hanya menghasilkan proses berpikir tanpa jawaban akhir. Coba model lain atau kirim ulang."
+            : "Model tidak mengembalikan jawaban. Model gratis kadang sibuk atau tidak tersedia; coba kirim ulang atau ganti LLM_MODEL.";
+        console.error("[chat] jawaban kosong:", reason);
+        controller.enqueue(encoder.encode(reason));
       }
       controller.close();
     },

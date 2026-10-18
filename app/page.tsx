@@ -18,8 +18,10 @@ export default function Page() {
     const text = input.trim();
     if (!text || loading) return;
 
-    const history: Msg[] = [...messages, { role: "user", content: text }];
-    setMessages([...history, { role: "assistant", content: "" }]);
+    // Pesan error/kosong hanya untuk tampilan; jangan ikut dikirim ke model.
+    const userMsg: Msg = { role: "user", content: text };
+    const history: Msg[] = [...messages.filter((m) => !m.error && m.content.trim() !== ""), userMsg];
+    setMessages([...messages, userMsg, { role: "assistant", content: "" }]);
     setInput("");
     setLoading(true);
 
@@ -44,6 +46,12 @@ export default function Page() {
         if (done) break;
         acc += decoder.decode(value, { stream: true });
         setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: acc }]);
+      }
+      if (!acc.trim()) {
+        setMessages((m) => [
+          ...m.slice(0, -1),
+          { role: "assistant", content: "Tidak ada jawaban dari server. Coba kirim ulang.", error: true },
+        ]);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Terjadi kesalahan";
