@@ -34,9 +34,9 @@ export async function POST(req: Request) {
     const file = form.get("file");
     if (!(file instanceof File)) throw new DocError("Pilih berkas untuk diunggah.");
     if (file.size > MAX_UPLOAD_BYTES) throw new DocError("Berkas terlalu besar (maksimal 4 MB).");
-    const text = await extractText(file.name, await file.arrayBuffer());
+    const { text, warning } = await extractText(file.name, await file.arrayBuffer());
     const { meta, truncated } = await addDoc(file.name, text);
-    return Response.json({ doc: meta, truncated });
+    return Response.json({ doc: meta, truncated, warning });
   } catch (e) {
     return fail(e);
   }

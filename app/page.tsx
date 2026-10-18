@@ -110,6 +110,7 @@ export default function Page() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Unggah gagal (HTTP ${res.status})`);
       if (data.truncated) setDocsMsg("Dokumen terlalu panjang, hanya 200.000 karakter pertama yang disimpan.");
+      else if (data.warning) setDocsMsg(data.warning);
       await loadDocs();
       setSelected((sel) => [...sel, data.doc.id].slice(0, 5));
     } catch (e) {

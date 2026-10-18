@@ -83,17 +83,46 @@ export async function deleteDoc(id: string): Promise<void> {
 }
 
 // ---------- Ekstraksi teks dari berkas yang diunggah ----------
-export async function extractText(name: string, data: ArrayBuffer): Promise<string> {
+export async function extractText(name: string, data: ArrayBuffer): Promise<{ text: string; warning?: string }> {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   if (ext === "pdf") {
-    const { extractText: pdfText, getDocumentProxy } = await import("unpdf");
+    const { getDocumentProxy } = await import("unpdf");
     const pdf = await getDocumentProxy(new Uint8Array(data));
-    const { text } = await pdfText(pdf, { mergePages: true });
-    const t = Array.isArray(text) ? text.join("\n") : text;
-    if (!t.trim()) throw new DocError("PDF ini tidak berisi teks yang bisa dibaca (mungkin hasil scan/gambar).");
-    return t;
+    const pages: string[] = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const content = await page.getTextContent();
+      // Banyak PDF tidak menyimpan karakter spasi; sisipkan spasi/baris baru dari posisi teks.
+      let out = "";
+      let prev: { x: number; y: number; w: number; h: number } | null = null;
+      for (const raw of content.items) {
+        const it = raw as { str?: string; transform?: number[]; width?: number; height?: number; hasEOL?: boolean };
+        if (typeof it.str !== "string" || !it.transform) continue;
+        const x = it.transform[4];
+        const y = it.transform[5];
+        const h = it.height || Math.abs(it.transform[3]) || 10;
+        if (prev && it.str) {
+          if (Math.abs(y - prev.y) > prev.h * 0.5) out += "\n";
+          else if (x - (prev.x + prev.w) > prev.h * 0.15 && !/\s$/.test(out) && !/^\s/.test(it.str)) out += " ";
+        }
+        out += it.str;
+        if (it.str) prev = { x, y, w: it.width ?? 0, h };
+        if (it.hasEOL) out += "\n";
+      }
+      pages.push(out);
+    }
+    const text = pages.join("\n\n");
+    if (!text.trim()) throw new DocError("PDF ini tidak berisi teks yang bisa dibaca (mungkin hasil scan/gambar).");
+    const perPage = text.length / Math.max(1, pdf.numPages);
+    return {
+      text,
+      warning:
+        perPage < 400
+          ? `Hanya ${text.length} karakter teks terbaca dari ${pdf.numPages} halaman. Sebagian besar isi PDF kemungkinan berupa gambar yang tidak bisa dibaca model. Klik "Lihat" untuk memeriksa.`
+          : undefined,
+    };
   }
-  if (TEXT_EXT.has(ext)) return new TextDecoder("utf-8").decode(data);
+  if (TEXT_EXT.has(ext)) return { text: new TextDecoder("utf-8").decode(data) };
   throw new DocError(`Format .${ext || "?"} belum didukung. Gunakan: pdf, txt, md, csv, tsv, json, log, xml, yaml, html.`);
 }
 
