@@ -20,6 +20,10 @@ Opsional:
 | `MCP_AUTH_TOKEN` | Mengaktifkan server MCP di `/api/mcp`. Klien wajib mengirim `Authorization: Bearer <token>` |
 | `CHAT_TOOLS` | Isi `true` agar chat boleh memanggil tool (butuh model yang mendukung tool calling) |
 
+## Tampilan
+
+Jawaban dirender sebagai markdown (teks tebal, daftar, tabel, blok kode, tautan). HTML mentah dalam jawaban tidak dijalankan dan tautan berbahaya dinetralkan. Di bawah tiap jawaban tampil nama model yang menjawab, dan nama tool jika model memanggil tool (`model · tool: calculate`).
+
 ## Model cadangan
 
 Model gratis sering sibuk atau mengembalikan jawaban kosong. Isi `LLM_MODELS` dengan beberapa model; aplikasi mencobanya berurutan dan pindah ke model berikutnya jika model sebelumnya mengembalikan error (termasuk error di tengah stream), jawaban kosong, atau tidak mulai menjawab dalam 12 detik. Nama model yang jelas bukan model chat (embedding, rerank, safety, audio) dilewati. Model yang akhirnya menjawab tercatat di header respons `X-LLM-Model`. Jika `LLM_MODELS` kosong, dipakai `LLM_MODEL`.

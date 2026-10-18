@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-type Msg = { role: "user" | "assistant"; content: string; error?: boolean };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  error?: boolean;
+  model?: string; // model yang akhirnya menjawab
+  tools?: string[]; // tool yang dipanggil model (jika ada)
+};
 
 export default function Page() {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -38,6 +46,9 @@ export default function Page() {
         throw new Error((await res.text()) || `HTTP ${res.status}`);
       }
 
+      const model = res.headers.get("x-llm-model") ?? undefined;
+      const tools = res.headers.get("x-llm-tools")?.split(",").filter(Boolean);
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
@@ -45,7 +56,7 @@ export default function Page() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: acc }]);
+        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: acc, model, tools }]);
       }
       if (!acc.trim()) {
         setMessages((m) => [
@@ -74,11 +85,38 @@ export default function Page() {
         {messages.length === 0 && (
           <div className="empty">Tanyakan apa saja untuk memulai percakapan.</div>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}>
-            {m.content || (loading && i === messages.length - 1 ? "…" : "")}
-          </div>
-        ))}
+        {messages.map((m, i) => {
+          const isLast = i === messages.length - 1;
+          const plain = m.role === "user" || m.error;
+          return (
+            <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}>
+              {plain ? (
+                m.content
+              ) : m.content ? (
+                <div className="md">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+                    }}
+                  >
+                    {m.content}
+                  </ReactMarkdown>
+                </div>
+              ) : loading && isLast ? (
+                "…"
+              ) : (
+                ""
+              )}
+              {m.role === "assistant" && !m.error && m.content && (m.model || m.tools?.length) && (
+                <div className="meta">
+                  {m.model}
+                  {m.tools?.length ? ` · tool: ${m.tools.join(", ")}` : ""}
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 

@@ -49,8 +49,9 @@ async function chatWithTools(
   apiKey: string,
   model: string,
   history: { role: string; content: string }[],
-): Promise<string | null> {
+): Promise<{ text: string; toolsUsed: string[] } | null> {
   const convo: Record<string, unknown>[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+  const toolsUsed: string[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -75,7 +76,7 @@ async function chatWithTools(
 
     if (calls.length === 0) {
       const content = typeof msg?.content === "string" ? msg.content.trim() : "";
-      return content || null; // kosong -> biarkan mode streaming/model lain mencoba
+      return content ? { text: content, toolsUsed } : null; // kosong -> biarkan mode streaming/model lain mencoba
     }
 
     convo.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
@@ -87,10 +88,14 @@ async function chatWithTools(
         // argumen rusak: biarkan kosong, tool akan melaporkan parameter yang kurang
       }
       const { text } = await callTool(call.function.name, args);
+      // Hanya nama tool yang benar-benar ada yang dicatat (aman dipakai sebagai nilai header).
+      if (tools.some((t) => t.name === call.function.name) && !toolsUsed.includes(call.function.name)) {
+        toolsUsed.push(call.function.name);
+      }
       convo.push({ role: "tool", tool_call_id: call.id, content: text });
     }
   }
-  return "Batas pemanggilan tool tercapai sebelum jawaban akhir selesai.";
+  return { text: "Batas pemanggilan tool tercapai sebelum jawaban akhir selesai.", toolsUsed };
 }
 
 type StreamState = { providerError: string; sawReasoning: boolean };
@@ -233,7 +238,9 @@ export async function POST(req: Request) {
     try {
       const answer = await chatWithTools(baseUrl, apiKey, models[0], messages);
       if (answer !== null) {
-        return new Response(answer, { headers: { ...TEXT_HEADERS, "X-LLM-Model": models[0] } });
+        const headers: Record<string, string> = { ...TEXT_HEADERS, "X-LLM-Model": models[0] };
+        if (answer.toolsUsed.length) headers["X-LLM-Tools"] = answer.toolsUsed.join(",");
+        return new Response(answer.text, { headers });
       }
     } catch (err) {
       console.error("[chat] mode tool error:", err instanceof Error ? err.message : err);
