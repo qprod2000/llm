@@ -32,11 +32,11 @@ Model gratis sering sibuk atau mengembalikan jawaban kosong. Isi `LLM_MODELS` de
 
 Centang **Jawaban terbaik (beberapa model)** di header. Alurnya:
 
-1. Tiga model teratas di `LLM_MODELS` menjawab **bersamaan** (non-streaming, batas 25 detik per model).
+1. Tiga model teratas di `LLM_MODELS` menjawab **bersamaan** dan diminta ringkas (sekitar 300 kata). Model yang tidak mulai menjawab dalam 12 detik dianggap gagal. Model yang lambat tetapi sedang menulis diberi waktu sampai 25 detik; teks yang sudah terkumpul tetap dipakai sebagai calon (ditandai terpotong).
 2. Satu model penilai membaca riwayat percakapan, pesan terakhir, dan semua calon jawaban, lalu menulis satu jawaban akhir yang konsisten dengan percakapan. Jawaban akhir ini di-stream.
 3. Caption menampilkan model calon dan penilainya.
 
-Penilai default adalah model calon pertama yang berhasil. Isi `LLM_JUDGE_MODEL` untuk menentukan penilai tertentu (dicoba lebih dulu). Penilai dicoba maksimal 3 model.
+Penilai default adalah model calon pertama yang berhasil dan selesai tepat waktu. Isi `LLM_JUDGE_MODEL` untuk menentukan penilai tertentu (dicoba lebih dulu). Penilai dicoba maksimal 3 model.
 
 Perilaku jika ada yang gagal:
 
