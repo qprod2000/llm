@@ -28,6 +28,27 @@ Jawaban dirender sebagai markdown (teks tebal, daftar, tabel, blok kode, tautan)
 
 Model gratis sering sibuk atau mengembalikan jawaban kosong. Isi `LLM_MODELS` dengan beberapa model; aplikasi mencobanya berurutan dan pindah ke model berikutnya jika model sebelumnya mengembalikan error (termasuk error di tengah stream), jawaban kosong, atau tidak mulai menjawab dalam 12 detik. Nama model yang jelas bukan model chat (embedding, rerank, safety, audio) dilewati. Model yang akhirnya menjawab tercatat di header respons `X-LLM-Model`. Jika `LLM_MODELS` kosong, dipakai `LLM_MODEL`.
 
+## Mode "Jawaban terbaik" (opsional)
+
+Centang **Jawaban terbaik (beberapa model)** di header. Alurnya:
+
+1. Tiga model teratas di `LLM_MODELS` menjawab **bersamaan** (non-streaming, batas 25 detik per model).
+2. Satu model penilai membaca riwayat percakapan, pesan terakhir, dan semua calon jawaban, lalu menulis satu jawaban akhir yang konsisten dengan percakapan. Jawaban akhir ini di-stream.
+3. Caption menampilkan model calon dan penilainya.
+
+Penilai default adalah model calon pertama yang berhasil. Isi `LLM_JUDGE_MODEL` untuk menentukan penilai tertentu (dicoba lebih dulu). Penilai dicoba maksimal 3 model.
+
+Perilaku jika ada yang gagal:
+
+| Kondisi | Hasil |
+|---|---|
+| Hanya 1 calon yang berhasil | Jawaban calon itu dipakai langsung (tanpa penilai), caption "mode terbaik tidak lengkap" |
+| Semua penilai gagal | Jawaban calon pertama dipakai apa adanya |
+| Tidak ada calon yang berhasil | Jatuh ke mode berurutan dengan sisa model di daftar |
+| Daftar hanya berisi 1 model | Berjalan seperti mode biasa |
+
+Catatan: satu pesan memakai 3 panggilan calon + 1 panggilan penilai, jadi kuota gratis lebih cepat habis dan jawaban lebih lambat. Mode ini tidak memakai tool (`CHAT_TOOLS`).
+
 ## Tool dan MCP
 
 Semua tool didefinisikan di satu tempat: `lib/tools.ts` (contoh: `get_current_time` dan `calculate`). Tool yang sama dipakai dua jalur:

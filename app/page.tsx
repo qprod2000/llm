@@ -10,12 +10,25 @@ type Msg = {
   error?: boolean;
   model?: string; // model yang akhirnya menjawab
   tools?: string[]; // tool yang dipanggil model (jika ada)
+  mode?: string; // "best" (calon + penilai) atau "partial" (mode terbaik tidak lengkap)
+  candidates?: string[]; // model calon pada mode "best"
 };
+
+function caption(m: Msg): string {
+  if (m.mode === "best" && m.candidates?.length) {
+    return `Jawaban terbaik dari ${m.candidates.length} model (${m.candidates.join(", ")}) · penilai: ${m.model}`;
+  }
+  if (m.mode === "partial") {
+    return `${m.model} · mode terbaik tidak lengkap (hanya satu model atau penilai yang berhasil)`;
+  }
+  return `${m.model ?? ""}${m.tools?.length ? ` · tool: ${m.tools.join(", ")}` : ""}`;
+}
 
 export default function Page() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [best, setBest] = useState(false); // mode jawaban terbaik (beberapa model + penilai)
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,6 +52,7 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: history.map(({ role, content }) => ({ role, content })),
+          mode: best ? "best" : "single",
         }),
       });
 
@@ -48,6 +62,8 @@ export default function Page() {
 
       const model = res.headers.get("x-llm-model") ?? undefined;
       const tools = res.headers.get("x-llm-tools")?.split(",").filter(Boolean);
+      const mode = res.headers.get("x-llm-mode") ?? undefined;
+      const candidates = res.headers.get("x-llm-candidates")?.split(",").filter(Boolean);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -56,7 +72,10 @@ export default function Page() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: acc, model, tools }]);
+        setMessages((m) => [
+          ...m.slice(0, -1),
+          { role: "assistant", content: acc, model, tools, mode, candidates },
+        ]);
       }
       if (!acc.trim()) {
         setMessages((m) => [
@@ -76,6 +95,10 @@ export default function Page() {
     <main className="app">
       <header>
         <span>LLM Chat</span>
+        <label className="toggle" title="Beberapa model menjawab, lalu satu penilai menggabungkan jawaban terbaik. Lebih lambat dan memakai lebih banyak kuota.">
+          <input type="checkbox" checked={best} onChange={(e) => setBest(e.target.checked)} disabled={loading} />
+          Jawaban terbaik (beberapa model)
+        </label>
         <button onClick={() => setMessages([])} disabled={loading}>
           Percakapan baru
         </button>
@@ -104,15 +127,12 @@ export default function Page() {
                   </ReactMarkdown>
                 </div>
               ) : loading && isLast ? (
-                "…"
+                best ? "Menunggu beberapa model…" : "…"
               ) : (
                 ""
               )}
               {m.role === "assistant" && !m.error && m.content && (m.model || m.tools?.length) && (
-                <div className="meta">
-                  {m.model}
-                  {m.tools?.length ? ` · tool: ${m.tools.join(", ")}` : ""}
-                </div>
+                <div className="meta">{caption(m)}</div>
               )}
             </div>
           );
