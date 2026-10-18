@@ -83,6 +83,22 @@ export async function deleteDoc(id: string): Promise<void> {
 }
 
 // ---------- Ekstraksi teks dari berkas yang diunggah ----------
+// Beberapa PDF menyimpan kata tanpa spasi sama sekali dalam satu potongan teks, sehingga posisi
+// tidak bisa dipakai untuk memulihkannya. Jika spasinya jauh lebih sedikit dari teks normal,
+// pisahkan di batas huruf kecil->besar, huruf<->angka, dan setelah tanda baca. Ini heuristik:
+// kata yang sepenuhnya huruf kecil dan menempel (mis. "sesuaidengan") tidak bisa dipulihkan.
+export function repairGluedText(text: string): string {
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  const spaces = (text.match(/ /g) ?? []).length;
+  if (letters < 80 || spaces / letters >= 0.12) return text;
+  return text
+    .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{L})(\d)/gu, "$1 $2")
+    .replace(/(\d)(\p{L}{2,})/gu, "$1 $2")
+    .replace(/([,;:])(?=\p{L})/gu, "$1 ")
+    .replace(/(\p{L}{2})\.(?=\p{Lu}\p{Ll})/gu, "$1. ");
+}
+
 export async function extractText(name: string, data: ArrayBuffer): Promise<{ text: string; warning?: string }> {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   if (ext === "pdf") {
@@ -111,7 +127,7 @@ export async function extractText(name: string, data: ArrayBuffer): Promise<{ te
       }
       pages.push(out);
     }
-    const text = pages.join("\n\n");
+    const text = repairGluedText(pages.join("\n\n"));
     if (!text.trim()) throw new DocError("PDF ini tidak berisi teks yang bisa dibaca (mungkin hasil scan/gambar).");
     const perPage = text.length / Math.max(1, pdf.numPages);
     return {
