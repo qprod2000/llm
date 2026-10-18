@@ -71,3 +71,9 @@ form button:disabled { opacity: 0.5; cursor: default; }
 .docs li button { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px; padding: 2px 8px; cursor: pointer; flex: none; }
 .doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-size, .docs-empty, .docs-hint { color: var(--muted); font-size: 12px; flex: none; }
+.docs li > div, .docs li > span { display: flex; gap: 6px; }
+.preview pre { margin: 6px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; background: rgba(127,127,127,0.15); padding: 8px; border-radius: 8px; }
+.preview button { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 0 6px; cursor: pointer; }
+details.meta summary { cursor: pointer; }
+details.meta ul { margin: 4px 0 0; padding-left: 18px; }
+.doc-actions { display: flex; gap: 6px; flex: none; }

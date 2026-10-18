@@ -51,6 +51,8 @@ Perilaku jika ada yang gagal:
 
 Catatan: satu pesan memakai 3 panggilan calon + 1 panggilan penilai, jadi kuota gratis lebih cepat habis dan jawaban lebih lambat. Mode ini tidak memakai tool (`CHAT_TOOLS`).
 
+Jika ada model yang gagal atau dilewati (kuota habis, timeout), di bawah jawaban muncul bagian lipat "N model gagal/dilewati" berisi alasannya.
+
 ## Tool dan MCP
 
 Semua tool didefinisikan di satu tempat: `lib/tools.ts` (contoh: `get_current_time` dan `calculate`). Tool yang sama dipakai dua jalur:
@@ -80,6 +82,7 @@ Unggah berkas agar bisa dipakai sebagai konteks chat dan dibaca lewat MCP.
 - **Format:** pdf berisi teks (hasil scan/gambar tidak terbaca), txt, md, csv, tsv, json, log, xml, yaml, html. Maksimal 4 MB per berkas (batas body fungsi Vercel); teks yang disimpan maksimal 200.000 karakter. Word/Excel belum didukung.
 - **Di chat:** klik **Dokumen**, unggah, lalu centang dokumen yang dipakai (maksimal 5). Isinya disisipkan sebagai konteks (total sekitar 24.000 karakter, dibagi rata; yang lebih panjang dipotong). Mode "Jawaban terbaik": para calon melihat dokumen, penilai hanya melihat percakapan dan jawaban calon.
 - **Di MCP:** tool `list_documents`, `read_document` (bisa bertahap dengan `offset`), `search_documents` (pencarian kata kunci sederhana di 30 dokumen terbaru), dan `add_document`. Chat web hanya boleh membaca, tidak menulis dokumen.
+- Tombol **Lihat** di tiap dokumen menampilkan teks yang berhasil diekstrak (6.000 karakter pertama), berguna untuk memastikan PDF terbaca.
 - Isi dokumen diperlakukan sebagai data, bukan instruksi, tetapi model tetap bisa terpengaruh teks di dalamnya; jangan unggah dokumen dari sumber yang tidak dipercaya jika chat tool aktif.
 
 ## Jalankan lokal

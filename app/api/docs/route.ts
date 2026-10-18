@@ -1,5 +1,5 @@
 import { docsGate } from "../../../lib/auth";
-import { DocError, MAX_UPLOAD_BYTES, addDoc, deleteDoc, extractText, listDocs } from "../../../lib/docs";
+import { DocError, MAX_UPLOAD_BYTES, addDoc, deleteDoc, extractText, listDocs, readDoc } from "../../../lib/docs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,6 +14,12 @@ export async function GET(req: Request) {
   const blocked = docsGate(req);
   if (blocked) return blocked;
   try {
+    // ?id=... -> pratinjau teks yang berhasil diekstrak dari dokumen itu
+    const id = new URL(req.url).searchParams.get("id");
+    if (id) {
+      const { meta, text } = await readDoc(id);
+      return Response.json({ name: meta.name, length: text.length, text: text.slice(0, 6000) });
+    }
     return Response.json({ docs: await listDocs() });
   } catch (e) {
     return fail(e);

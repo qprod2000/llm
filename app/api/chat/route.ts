@@ -322,6 +322,12 @@ function toByteStream(first: string, rest: AsyncGenerator<string, void, undefine
   });
 }
 
+// Alasan model yang dilewati/gagal, dikirim ke browser (di-encode agar aman sebagai nilai header).
+function skipped(failures: string[]): Record<string, string> {
+  if (!failures.length) return {};
+  return { "X-LLM-Skipped": encodeURIComponent(failures.join("\n").slice(0, 1200)) };
+}
+
 const TEXT_HEADERS = { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" };
 
 export async function POST(req: Request) {
@@ -406,7 +412,7 @@ export async function POST(req: Request) {
 
     if (good.length === 1) {
       return new Response(good[0].text, {
-        headers: { ...TEXT_HEADERS, "X-LLM-Model": good[0].model, "X-LLM-Mode": "partial" },
+        headers: { ...TEXT_HEADERS, ...skipped(failures), "X-LLM-Model": good[0].model, "X-LLM-Mode": "partial" },
       });
     }
 
@@ -427,7 +433,7 @@ export async function POST(req: Request) {
         if (opened.ok) {
           return new Response(toByteStream(opened.first, opened.rest), {
             headers: {
-              ...TEXT_HEADERS,
+              ...TEXT_HEADERS, ...skipped(failures),
               "X-LLM-Model": judge,
               "X-LLM-Mode": "best",
               "X-LLM-Candidates": good.map((g) => g.model).join(","),
@@ -440,7 +446,7 @@ export async function POST(req: Request) {
 
       // Semua penilai gagal: pakai jawaban calon pertama apa adanya.
       return new Response(good[0].text, {
-        headers: { ...TEXT_HEADERS, "X-LLM-Model": good[0].model, "X-LLM-Mode": "partial" },
+        headers: { ...TEXT_HEADERS, ...skipped(failures), "X-LLM-Model": good[0].model, "X-LLM-Mode": "partial" },
       });
     }
     // Tidak ada calon yang menjawab: lanjut ke mode berurutan dengan sisa model.
@@ -454,7 +460,7 @@ export async function POST(req: Request) {
     const opened = await openStream(baseUrl, apiKey, model, messages);
     if (opened.ok) {
       return new Response(toByteStream(opened.first, opened.rest), {
-        headers: { ...TEXT_HEADERS, "X-LLM-Model": model },
+        headers: { ...TEXT_HEADERS, ...skipped(failures), "X-LLM-Model": model },
       });
     }
     console.error(`[chat] ${model} gagal: ${opened.error}`);

@@ -14,6 +14,7 @@ type Msg = {
   tools?: string[]; // tool yang dipanggil model (jika ada)
   mode?: string; // "best" (calon + penilai) atau "partial" (mode terbaik tidak lengkap)
   candidates?: string[]; // model calon pada mode "best"
+  skipped?: string[]; // model yang dilewati/gagal beserta alasannya
 };
 
 function caption(m: Msg): string {
@@ -42,6 +43,15 @@ export default function Page() {
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsMsg, setDocsMsg] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<{ name: string; length: number; text: string } | null>(null);
+
+  async function showPreview(id: string) {
+    setDocsMsg("");
+    const res = await fetch(`/api/docs?id=${encodeURIComponent(id)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setDocsMsg(data.error ?? "Gagal membaca dokumen.");
+    setPreview(data);
+  }
 
   async function loadDocs() {
     try {
@@ -158,6 +168,11 @@ export default function Page() {
       const tools = res.headers.get("x-llm-tools")?.split(",").filter(Boolean);
       const mode = res.headers.get("x-llm-mode") ?? undefined;
       const candidates = res.headers.get("x-llm-candidates")?.split(",").filter(Boolean);
+      let skipped: string[] | undefined;
+      try {
+        const raw = res.headers.get("x-llm-skipped");
+        skipped = raw ? decodeURIComponent(raw).split("\n").filter(Boolean) : undefined;
+      } catch {}
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -168,7 +183,7 @@ export default function Page() {
         acc += decoder.decode(value, { stream: true });
         setMessages((m) => [
           ...m.slice(0, -1),
-          { role: "assistant", content: acc, model, tools, mode, candidates },
+          { role: "assistant", content: acc, model, tools, mode, candidates, skipped },
         ]);
       }
       if (!acc.trim()) {
@@ -258,12 +273,27 @@ export default function Page() {
                   <span className="doc-name">{d.name}</span>
                   <span className="doc-size">{Math.max(1, Math.round(d.size / 1024))} KB</span>
                 </label>
+                <span className="doc-actions">
+                <button onClick={() => showPreview(d.id)} title="Lihat teks yang terbaca" aria-label={`Lihat teks ${d.name}`}>
+                  Lihat
+                </button>
                 <button onClick={() => removeDoc(d.id)} title="Hapus dokumen" aria-label={`Hapus ${d.name}`}>
                   Hapus
                 </button>
+                </span>
               </li>
             ))}
           </ul>
+          {preview && (
+            <div className="preview">
+              <div className="docs-hint">
+                Teks terbaca dari {preview.name}: {preview.length.toLocaleString("id-ID")} karakter
+                {preview.length > preview.text.length ? " (ditampilkan 6.000 pertama)" : ""}.{" "}
+                <button onClick={() => setPreview(null)}>Tutup</button>
+              </div>
+              <pre>{preview.text}</pre>
+            </div>
+          )}
           <div className="docs-hint">Dokumen yang dicentang (maksimal 5) dipakai sebagai konteks tiap pertanyaan.</div>
         </section>
       )}
@@ -298,6 +328,16 @@ export default function Page() {
               {m.role === "assistant" && !m.error && m.content && (m.model || m.tools?.length) && (
                 <div className="meta">{caption(m)}</div>
               )}
+              {m.role === "assistant" && !m.error && m.content && m.skipped?.length ? (
+                <details className="meta">
+                  <summary>{m.skipped.length} model gagal/dilewati</summary>
+                  <ul>
+                    {m.skipped.map((x, k) => (
+                      <li key={k}>{x}</li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
             </div>
           );
         })}
