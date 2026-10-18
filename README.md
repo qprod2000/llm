@@ -12,6 +12,34 @@ Aplikasi chat LLM sederhana (Next.js) dengan respons streaming. Memakai API key 
 
 Contoh nilai untuk Groq, Google Gemini, dan OpenRouter ada di `.env.example`.
 
+Opsional (fitur tool/MCP):
+
+| Variabel | Fungsi |
+|---|---|
+| `MCP_AUTH_TOKEN` | Mengaktifkan server MCP di `/api/mcp`. Klien wajib mengirim `Authorization: Bearer <token>` |
+| `CHAT_TOOLS` | Isi `true` agar chat boleh memanggil tool (butuh model yang mendukung tool calling) |
+
+## Tool dan MCP
+
+Semua tool didefinisikan di satu tempat: `lib/tools.ts` (contoh: `get_current_time` dan `calculate`). Tool yang sama dipakai dua jalur:
+
+- **Chat sebagai client:** dengan `CHAT_TOOLS=true`, model di `/api/chat` boleh memanggil tool. Jika provider menolak parameter tools, chat otomatis kembali ke mode streaming biasa. Saat tool aktif, jawaban dikirim utuh, tidak bertahap.
+- **Server MCP:** `/api/mcp` (Streamable HTTP, tanpa sesi) membuka tool yang sama untuk klien MCP luar. Endpoint ini nonaktif sampai `MCP_AUTH_TOKEN` diisi.
+
+Menambah tool baru: tambahkan satu objek ke array `tools` di `lib/tools.ts`. Tool langsung tersedia di chat dan di MCP.
+
+Uji endpoint MCP:
+
+```bash
+curl -s https://<domain-anda>/api/mcp \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Untuk menyambungkan dari klien MCP, pakai alamat `https://<domain-anda>/api/mcp` dan kirim header `Authorization: Bearer <token>` (klien yang hanya mendukung OAuth tidak bisa dipakai dengan token statis ini).
+
 ## Jalankan lokal
 
 ```bash

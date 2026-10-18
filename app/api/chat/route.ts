@@ -1,3 +1,5 @@
+import { callTool, tools } from "../../../lib/tools";
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -5,6 +7,69 @@ type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
 const MAX_MESSAGES = 30;
 const MAX_CHARS = 8000;
+const MAX_TOOL_ROUNDS = 5;
+const SYSTEM_PROMPT = "Kamu asisten yang membantu. Jawab dalam bahasa yang dipakai pengguna.";
+
+const openAiTools = tools.map((t) => ({
+  type: "function" as const,
+  function: { name: t.name, description: t.description, parameters: t.inputSchema },
+}));
+
+class UpstreamError extends Error {
+  constructor(
+    public status: number,
+    detail: string,
+  ) {
+    const hint = status === 429 ? " (batas penggunaan gratis tercapai, coba lagi sebentar)" : "";
+    super(`Provider error ${status}${hint}: ${detail.slice(0, 300)}`);
+  }
+}
+
+type ToolCall = { id: string; function: { name: string; arguments?: string } };
+
+// Mode tool: model boleh memanggil tool di lib/tools.ts. Tidak di-stream (jawaban dikirim utuh).
+// Mengembalikan null bila provider/model menolak parameter `tools`, supaya pemanggil
+// bisa kembali ke mode streaming biasa.
+async function chatWithTools(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  history: { role: string; content: string }[],
+): Promise<string | null> {
+  const convo: Record<string, unknown>[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: convo, tools: openAiTools, tool_choice: "auto" }),
+    });
+
+    if (!res.ok) {
+      if (round === 0 && [400, 404, 422].includes(res.status)) return null;
+      throw new UpstreamError(res.status, await res.text().catch(() => ""));
+    }
+
+    const data = await res.json();
+    const msg = data?.choices?.[0]?.message;
+    const calls: ToolCall[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+
+    if (calls.length === 0) return typeof msg?.content === "string" ? msg.content : "";
+
+    convo.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
+    for (const call of calls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        // argumen rusak: biarkan kosong, tool akan melaporkan parameter yang kurang
+      }
+      const { text } = await callTool(call.function.name, args);
+      convo.push({ role: "tool", tool_call_id: call.id, content: text });
+    }
+  }
+  return "Batas pemanggilan tool tercapai sebelum jawaban akhir selesai.";
+}
 
 export async function POST(req: Request) {
   const baseUrl = (process.env.LLM_BASE_URL ?? "https://api.groq.com/openai/v1").replace(/\/$/, "");
@@ -31,6 +96,22 @@ export async function POST(req: Request) {
     return new Response("Pesan kosong.", { status: 400 });
   }
 
+  if (process.env.CHAT_TOOLS === "true") {
+    try {
+      const answer = await chatWithTools(baseUrl, apiKey, model, messages);
+      if (answer !== null) {
+        return new Response(answer, {
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+      // provider menolak tools -> lanjut ke mode streaming biasa di bawah
+    } catch (err) {
+      const status = err instanceof UpstreamError ? 502 : 500;
+      const text = err instanceof Error ? err.message : "Terjadi kesalahan.";
+      return new Response(text, { status });
+    }
+  }
+
   const upstream = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -41,7 +122,7 @@ export async function POST(req: Request) {
       model,
       stream: true,
       messages: [
-        { role: "system", content: "Kamu asisten yang membantu. Jawab dalam bahasa yang dipakai pengguna." },
+        { role: "system", content: SYSTEM_PROMPT },
         ...messages,
       ],
     }),
